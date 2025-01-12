@@ -1,98 +1,42 @@
-classdef LearnableReproduction
-    properties
-        M1  % 训练好的模型 M1
-        M2  % 训练好的模型 M2
-        P  % 父代种群实例
-        problem  % 问题实例
-        alpha  % 参数 alpha
-        lb  % 下界
-        ub  % 上界
-        dim  % 决策变量维度
-        N  % 种群规模
+function Offspring = LearnableReproduction(Problem, Population, MLPs, alpha)
+
+%------------------------------- Copyright --------------------------------
+% Copyright (c) 2024 BIMK Group. You are free to use the PlatEMO for
+% research purposes. All publications which use this platform or any code
+% in the platform should acknowledge the use of "PlatEMO" and reference "Ye
+% Tian, Ran Cheng, Xingyi Zhang, and Yaochu Jin, PlatEMO: A MATLAB platform
+% for evolutionary multi-objective optimization [educational forum], IEEE
+% Computational Intelligence Magazine, 2017, 12(4): 73-87".
+%--------------------------------------------------------------------------
+
+    Offspring = zeros(Problem.N,Problem.D);
+    for xi = 1:Problem.N
+        x = Population(xi).dec;
+        y_1 = MLPs.ReproductionM1(x);
+        y_2 = MLPs.ReproductionM2(x);
+        other_indices = [1:xi-1, xi+1:Problem.N];
+        selected = randperm(length(other_indices), 2);
+        p1 = other_indices(selected(1));
+        p2 = other_indices(selected(2));
+        % eq7
+        x_c = x + alpha*(y_1-x) + (0.5-alpha)*(y_2-x) + ...
+            rand*(Population(p1).dec - Population(p2).dec);
+        % 多项式变异
+        proM = 1; disM = 20;
+        Lower = Problem.lower;
+        Upper = Problem.upper;
+        x_c   = min(max(x_c,Lower),Upper);
+        Site  = rand(1,Problem.D) < proM/Problem.D;
+        mu    = rand(1,Problem.D);
+        temp  = Site & mu <= 0.5;
+        x_c(temp) = x_c(temp) + (Upper(temp)-Lower(temp)).*...
+            ((2.*mu(temp) + (1 - 2.*mu(temp)).*...
+            (1 - (x_c(temp)-Lower(temp))./(Upper(temp)-Lower(temp))).^(disM+1)).^(1/(disM+1)) - 1);
+        temp = Site & mu > 0.5;
+        x_c(temp) = x_c(temp) + (Upper(temp)-Lower(temp)).*...
+            (1 - (2.*(1-mu(temp)) + 2.*(mu(temp)-0.5).*...
+            (1 - (Upper(temp)-x_c(temp))./(Upper(temp)-Lower(temp))).^(disM+1)).^(1/(disM+1)));
+        Offspring(xi,:) = x_c;
     end
-
-    methods
-        function obj = LearnableReproduction(M1, M2, P, problem, alpha)
-            obj.M1 = M1;
-            obj.M2 = M2;
-            obj.P = P.pop;  % 获取种群数据
-            obj.problem = problem;
-            obj.alpha = alpha;
-            obj.lb = problem.lb;
-            obj.ub = problem.ub;
-            obj.dim = problem.dim;
-            obj.N = size(P.pop, 1);
-        end
-
-        function x = polynomial_mutation(obj, x, eta)
-            % 多项式变异操作
-            if nargin < 3
-                eta = 20;
-            end
-            for i = 1:obj.dim
-                if rand <= 1 / obj.dim
-                    delta1 = (x(i) - obj.lb(i)) / (obj.ub(i) - obj.lb(i));
-                    delta2 = (obj.ub(i) - x(i)) / (obj.ub(i) - obj.lb(i));
-                    rand_val = rand;
-                    mut_pow = 1 / (eta + 1);
-                    if rand_val < 0.5
-                        xy = 1 - delta1;
-                        val = 2 * rand_val + (1 - 2 * rand_val) * (xy^(eta + 1));
-                        delta_q = val^(mut_pow) - 1;
-                    else
-                        xy = 1 - delta2;
-                        val = 2 * (1 - rand_val) + 2 * (rand_val - 0.5) * (xy^(eta + 1));
-                        delta_q = 1 - val^(mut_pow);
-                    end
-                    x(i) = x(i) + delta_q * (obj.ub(i) - obj.lb(i));
-                    x(i) = min(max(x(i), obj.lb(i)), obj.ub(i));
-                end
-            end
-        end
-
-        function y = denorm_y(obj, y_norm)
-            % 反归一化解 y
-            y = y_norm .* (obj.ub - obj.lb + 1e-8) + obj.lb;
-        end
-
-        function Q = reproduce(obj)
-            % 执行可学习的繁殖过程，生成子代种群 Q
-            Q = Population(obj.problem, 0);
-
-            for i = 1:obj.N
-                x = obj.P(i, :)';
-
-                % 计算 y1 和 y2
-                y1_norm = obj.M1(x);
-                y1 = obj.denorm_y(y1_norm);
-                y2_norm = obj.M2(x);
-                y2 = obj.denorm_y(y2_norm);
-
-                % 从 P 中随机选择两个不同的解 xd1 和 xd2
-                idxs = 1:obj.N;
-                idxs(i) = [];
-                xd_indices = randperm(length(idxs), 2);
-                xd1 = obj.P(idxs(xd_indices(1)), :)';
-                xd2 = obj.P(idxs(xd_indices(2)), :)';
-
-                % 计算子代解 xc
-                r = rand;
-                xc = x + obj.alpha * (y1 - x) + (0.5 - obj.alpha) * (y2 - x) + r * (xd1 - xd2);
-
-                % 多项式变异
-                xc_new = obj.polynomial_mutation(xc);
-                xc_new = min(max(xc_new, obj.lb), obj.ub);
-
-                % 贪婪选择
-                xc_new_obj = obj.problem.evaluate(xc_new);
-                xc_obj = obj.problem.evaluate(xc);
-                if xc_new_obj <= xc_obj
-                    xc = xc_new;
-                end
-
-                % 添加到子代种群 Q 中
-                Q = Q.append_pop(xc');
-            end
-        end
-    end
+    Offspring = Problem.Evaluation(Offspring);
 end

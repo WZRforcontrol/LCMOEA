@@ -1,0 +1,120 @@
+function [] =  LCMOEA(probl, N, max_iter, varargin)
+% probl,N,device,...
+%                       hidden_sizes,num_epochs,learning_rate,...
+%                       model_dir,is_plot,image_dir,video_dir,xlim,ylim,...
+%                       FE_max,avg_constraint_violations,best_obj_values,avg_obj_values)
+% 构造函数
+p = inputParser;
+addParameter(p, 'is_plot', false);
+addParameter(p, 'xlim', []);
+addParameter(p, 'ylim', []);
+parse(p, varargin{:});
+
+hidden_sizes = [10];  % 默认隐藏层大小
+num_epochs = 100;  % 默认训练轮数
+learning_rate = 0.001;  % 默认学习率
+model_dir = 'models';
+if ~exist(model_dir, 'dir')
+    mkdir(model_dir);
+end
+is_plot = p.Results.is_plot;
+image_dir = 'images/LCMOEA_img';
+if ~exist(image_dir, 'dir')
+    mkdir(image_dir);
+end
+obj.video_dir = 'video';
+if ~exist(obj.video_dir, 'dir')
+    mkdir(obj.video_dir);
+end
+xlim = p.Results.xlim;
+ylim = p.Results.ylim;
+fronts = [];
+FE_max = max_iter;
+avg_constraint_violations = [];
+best_obj_values = [];
+avg_obj_values = [];
+% 运行算法
+% 1. 初始化种群
+P = Population(probl, N);
+P = P.gps_init();
+% 2. 主循环
+FE = 0;
+while FE <= obj.FE_max
+    disp(['Evaluating counter ', num2str(FE)]);
+
+    % 3. 训练模型 M1 和 M2
+    % 请使用 MATLAB 的神经网络工具箱实现 MLP_Training
+
+    % 4. 可学习的繁殖，生成子代种群 Q
+    % 请使用 MATLAB 实现 LearnableReproduction
+
+    % 5. 环境选择，选择下一代种群 P
+    % 请使用 MATLAB 实现 ClusteringAidedSelection
+
+    % 6. 更新函数评价次数 FE
+    FE = FE + length(P.pop);
+
+    % 绘制 Pareto 前沿
+    if obj.is_plot && obj.probl.num_obj <= 2
+        obj.plot_pareto(FE);
+    end
+end
+
+% 绘制最终的 Pareto 前沿
+obj.plot_pareto_end();
+
+% 输出 Pareto 前沿
+pareto_front = obj.fronts.pop;
+
+
+end
+
+function plot_pareto(obj, FE)
+% 绘制 Pareto 前沿
+if isempty(obj.fronts)
+    disp('No fronts to plot.');
+    return;
+end
+
+obj.fronts = obj.fronts.compute_obj_val();
+objectives = obj.fronts.obj_val;
+figure;
+scatter(objectives(:, 1), objectives(:, 2), 'filled');
+xlabel('Objective 1');
+ylabel('Objective 2');
+title(['Pareto Front at FE=', num2str(FE)]);
+grid on;
+
+% 设置坐标范围
+if ~isempty(obj.xlim)
+    xlim(obj.xlim);
+end
+if ~isempty(obj.ylim)
+    ylim(obj.ylim);
+end
+
+saveas(gcf, fullfile(obj.image_dir, ['pareto_front_', num2str(FE), '.png']));
+close;
+end
+
+function plot_pareto_end(obj)
+% 绘制最终的 Pareto 前沿
+if isempty(obj.fronts)
+    disp('No fronts to plot.');
+    return;
+end
+
+obj.fronts = obj.fronts.compute_obj_val();
+objectives = obj.fronts.obj_val;
+figure;
+scatter(objectives(:, 1), objectives(:, 2), 'filled');
+xlabel('Objective 1');
+ylabel('Objective 2');
+title('Pareto Front at the end');
+grid on;
+
+saveas(gcf, fullfile(obj.image_dir, 'pareto_front_end.svg'));
+close;
+end
+
+
