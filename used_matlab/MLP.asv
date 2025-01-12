@@ -23,7 +23,6 @@ classdef MLP < handle
         lr % 学习率
         Population  % 种群
         ref_vec % 参考向量
-        batch_size = 32; % 添加批量大小属性
         
         % M1 与 M2 网络的权重
         M1_hidden_weights
@@ -96,122 +95,90 @@ classdef MLP < handle
 
         function train_net_M1(obj, inputs, targets)
             % 针对 M1 网络进行批量训练
-            num_samples = size(inputs, 1);
-            num_batches = ceil(num_samples / obj.batch_size);
-            
             for e = 1:obj.num_epochs
-                % 随机打乱数据
-                shuffle_idx = randperm(num_samples);
-                inputs_shuffled = inputs(shuffle_idx, :);
-                targets_shuffled = targets(shuffle_idx, :);
+                input = inputs(e);
+                % 前向传播
+                [outputs, hidden_outputs] = obj.forward_batch_M1(input);
                 
-                for b = 1:num_batches
-                    % 获取当前批次的数据
-                    start_idx = (b-1) * obj.batch_size + 1;
-                    end_idx = min(b * obj.batch_size, num_samples);
-                    batch_inputs = inputs_shuffled(start_idx:end_idx, :);
-                    batch_targets = targets_shuffled(start_idx:end_idx, :);
-                    current_batch_size = size(batch_inputs, 1);
-
-                    % 前向传播
-                    [outputs, hidden_outputs] = obj.forward_batch_M1(batch_inputs);
-                    
-                    % 计算输出层误差
-                    output_err = (outputs - batch_targets) .* sigmoid_derivative(outputs);
-                    output_grad = hidden_outputs{end}' * output_err / current_batch_size;
-                    
-                    % 反向传播计算隐藏层误差
-                    hidden_err = cell(1, obj.num_layers);
-                    hidden_grad = cell(1, obj.num_layers);
-                    
-                    hidden_err{end} = (output_err * obj.M1_output_weights') .* ...
-                        leaky_relu_derivative(hidden_outputs{end});
-                    
-                    for i = obj.num_layers-1:-1:1
-                        hidden_err{i} = (hidden_err{i+1} * obj.M1_hidden_weights{i+1}') .* ...
-                            leaky_relu_derivative(hidden_outputs{i});
+                % 计算输出层误差
+                output_err = (outputs - targets) .* sigmoid_derivative(outputs);
+                output_grad = hidden_outputs{end}' * output_err;
+                
+                % 反向传播计算隐藏层误差
+                hidden_err = cell(1, obj.num_layers);
+                hidden_grad = cell(1, obj.num_layers);
+                
+                hidden_err{end} = (output_err * obj.M1_output_weights') .* ...
+                    leaky_relu_derivative(hidden_outputs{end});
+                
+                for i = obj.num_layers-1:-1:1
+                    hidden_err{i} = (hidden_err{i+1} * obj.M1_hidden_weights{i+1}') .* ...
+                        leaky_relu_derivative(hidden_outputs{i});
+                end
+                
+                % 计算隐藏层梯度
+                for i = 1:obj.num_layers
+                    if i == 1
+                        hidden_input = input;
+                    else
+                        hidden_input = hidden_outputs{i-1};
                     end
-                    
-                    % 计算隐藏层梯度
-                    for i = 1:obj.num_layers
-                        if i == 1
-                            hidden_input = batch_inputs;
-                        else
-                            hidden_input = hidden_outputs{i-1};
-                        end
-                        hidden_grad{i} = hidden_input' * hidden_err{i} / current_batch_size;
-                    end
-                    
-                    % 使用Adam更新权重
-                    [obj.M1_m_out, obj.M1_v_out, out_delta] = obj.AdamUpdate(obj.M1_m_out, obj.M1_v_out, output_grad, e);
-                    obj.M1_output_weights = obj.M1_output_weights - obj.lr * out_delta;
-                    
-                    for i = 1:obj.num_layers
-                        [obj.M1_m_hidden{i}, obj.M1_v_hidden{i}, h_delta] = ...
-                            obj.AdamUpdate(obj.M1_m_hidden{i}, obj.M1_v_hidden{i}, hidden_grad{i}, e);
-                        obj.M1_hidden_weights{i} = obj.M1_hidden_weights{i} - obj.lr * h_delta;
-                    end
+                    hidden_grad{i} = hidden_input' * hidden_err{i} / batch_size;
+                end
+                
+                % 使用Adam更新权重
+                [obj.M1_m_out, obj.M1_v_out, out_delta] = obj.AdamUpdate(obj.M1_m_out, obj.M1_v_out, output_grad, e);
+                obj.M1_output_weights = obj.M1_output_weights - obj.lr * out_delta;
+                
+                for i = 1:obj.num_layers
+                    [obj.M1_m_hidden{i}, obj.M1_v_hidden{i}, h_delta] = ...
+                        obj.AdamUpdate(obj.M1_m_hidden{i}, obj.M1_v_hidden{i}, hidden_grad{i}, e);
+                    obj.M1_hidden_weights{i} = obj.M1_hidden_weights{i} - obj.lr * h_delta;
                 end
             end
         end
         
         function train_net_M2(obj, inputs, targets)
             % 针对 M2 网络进行批量训练
-            num_samples = size(inputs, 1);
-            num_batches = ceil(num_samples / obj.batch_size);
-            
             for e = 1:obj.num_epochs
-                % 随机打乱数据
-                shuffle_idx = randperm(num_samples);
-                inputs_shuffled = inputs(shuffle_idx, :);
-                targets_shuffled = targets(shuffle_idx, :);
+                input = inputs(e);
+                % 前向传播
+                [outputs, hidden_outputs] = obj.forward_batch_M2(inputs);
                 
-                for b = 1:num_batches
-                    % 获取当前批次的数据
-                    start_idx = (b-1) * obj.batch_size + 1;
-                    end_idx = min(b * obj.batch_size, num_samples);
-                    batch_inputs = inputs_shuffled(start_idx:end_idx, :);
-                    batch_targets = targets_shuffled(start_idx:end_idx, :);
-                    current_batch_size = size(batch_inputs, 1);
-
-                    % 前向传播
-                    [outputs, hidden_outputs] = obj.forward_batch_M2(batch_inputs);
-                    
-                    % 计算输出层误差
-                    output_err = (outputs - batch_targets) .* sigmoid_derivative(outputs);
-                    output_grad = hidden_outputs{end}' * output_err / current_batch_size;
-                    
-                    % 反向传播计算隐藏层误差
-                    hidden_err = cell(1, obj.num_layers);
-                    hidden_grad = cell(1, obj.num_layers);
-                    
-                    hidden_err{end} = (output_err * obj.M2_output_weights') .* ...
-                        leaky_relu_derivative(hidden_outputs{end});
-                    
-                    for i = obj.num_layers-1:-1:1
-                        hidden_err{i} = (hidden_err{i+1} * obj.M2_hidden_weights{i+1}') .* ...
-                            leaky_relu_derivative(hidden_outputs{i});
+                % 计算输出层误差
+                output_err = (outputs - targets) .* sigmoid_derivative(outputs);
+                output_grad = hidden_outputs{end}' * output_err / batch_size;
+                
+                % 反向传播计算隐藏层误差
+                hidden_err = cell(1, obj.num_layers);
+                hidden_grad = cell(1, obj.num_layers);
+                
+                hidden_err{end} = (output_err * obj.M2_output_weights') .* ...
+                    leaky_relu_derivative(hidden_outputs{end});
+                
+                for i = obj.num_layers-1:-1:1
+                    hidden_err{i} = (hidden_err{i+1} * obj.M2_hidden_weights{i+1}') .* ...
+                        leaky_relu_derivative(hidden_outputs{i});
+                end
+                
+                % 计算隐藏层梯度
+                for i = 1:obj.num_layers
+                    if i == 1
+                        hidden_input = inputs;
+                    else
+                        hidden_input = hidden_outputs{i-1};
                     end
-                    
-                    % 计算隐藏层梯度
-                    for i = 1:obj.num_layers
-                        if i == 1
-                            hidden_input = batch_inputs;
-                        else
-                            hidden_input = hidden_outputs{i-1};
-                        end
-                        hidden_grad{i} = hidden_input' * hidden_err{i} / current_batch_size;
-                    end
-                    
-                    % 使用Adam更新权重
-                    [obj.M2_m_out, obj.M2_v_out, out_delta] = obj.AdamUpdate(obj.M2_m_out, obj.M2_v_out, output_grad, e);
-                    obj.M2_output_weights = obj.M2_output_weights - obj.lr * out_delta;
-                    
-                    for i = 1:obj.num_layers
-                        [obj.M2_m_hidden{i}, obj.M2_v_hidden{i}, h_delta] = ...
-                            obj.AdamUpdate(obj.M2_m_hidden{i}, obj.M2_v_hidden{i}, hidden_grad{i}, e);
-                        obj.M2_hidden_weights{i} = obj.M2_hidden_weights{i} - obj.lr * h_delta;
-                    end
+                    hidden_grad{i} = hidden_input' * hidden_err{i} / batch_size;
+                end
+                
+                % 使用Adam更新权重
+                [obj.M2_m_out, obj.M2_v_out, out_delta] = obj.AdamUpdate(obj.M2_m_out, obj.M2_v_out, output_grad, e);
+                obj.M2_output_weights = obj.M2_output_weights - obj.lr * out_delta;
+                
+                for i = 1:obj.num_layers
+                    [obj.M2_m_hidden{i}, obj.M2_v_hidden{i}, h_delta] = ...
+                        obj.AdamUpdate(obj.M2_m_hidden{i}, obj.M2_v_hidden{i}, hidden_grad{i}, e);
+                    obj.M2_hidden_weights{i} = obj.M2_hidden_weights{i} - obj.lr * h_delta;
                 end
             end
         end

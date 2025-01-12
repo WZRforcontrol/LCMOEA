@@ -29,6 +29,11 @@ classdef LCMOEA < ALGORITHM
         function main(Algorithm,Problem)
             %% Parameter settings
             [hidden_size, epochs, lr, num_layers] = Algorithm.ParameterSet(10, 100, 0.01, 1);
+            % hidden_size = Algorithm.ParameterSet(10);
+            % epochs = Algorithm.ParameterSet(100);
+            % lr = Algorithm.ParameterSet(0.01);
+            % num_layers = Algorithm.ParameterSet(1);
+
             %% Initial
             Population = Problem.Initialization();% 初始化
             ref_vec = UniformPoint(Problem.N,Problem.M,"MUD");% 生成参考向量
@@ -45,6 +50,7 @@ classdef LCMOEA < ALGORITHM
                 % Algorithm 4 ClusteringAidedSelection
                 Population = ClusteringAidedSelection(Problem, Population, Offspring, deg_pro);
             end
+            disPopulation.cons
         end
     end
 end
