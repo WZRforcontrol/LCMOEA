@@ -18,6 +18,11 @@ classdef LCMOEA < ALGORITHM
 % Tian, Ran Cheng, Xingyi Zhang, and Yaochu Jin, PlatEMO: A MATLAB platform
 % for evolutionary multi-objective optimization [educational forum], IEEE
 % Computational Intelligence Magazine, 2017, 12(4): 73-87".
+%------------------------------- Information ------------------------------
+% Author: Z.R.Wang
+% Email: wangzhanran@stumail.ysu.edu.cn
+% Affiliation: Intelligent Dynamical Systems Research Group, 
+% Department of Mechanical Design, Yanshan University, China
 %--------------------------------------------------------------------------
 
     methods
@@ -47,45 +52,9 @@ classdef LCMOEA < ALGORITHM
                 % Algorithm 2 Training
                 MLPs.train_models();
                 % Algorithm 3 LearnableReproduction
-                if deg_pro <= 0.5
-                    alpha = 0.5;
-                else
-                    alpha = 0.0;
-                end
-                Offspring  = LearnableReproduction(Problem, Population, MLPs, alpha);
-                % % 个人感觉author在玩赖，所以改了一下
-                % % if length(Archive) == Problem.N
-                % %     Nt = floor((1-a)*Problem.N);
-                % %     % 交配池，初期更多的在整个种群中采样，后期更多的在可行域种群中采样
-                % %     MatingPool = [Population(randsample(Problem.N,Nt)),Archive(randsample(Problem.N,Problem.N-Nt))];
-                % %     [Mate1,Mate2,Mate3] = Neighbor_Pairing_Strategy(MatingPool,Zmin);
-                % %     Offspring = OperatorDE(Problem,Mate1,Mate2,Mate3);% 差分进化+多项式变异
-                % % else
-                %     % Offspring  = LearnableDE(Problem, Population, V, k);% 鲁棒性较差
-                %     % Offspring  = LearnableDE2(Problem, Population, V, k, a);
-                %     % Offspring  = LearnableDE3(Problem, Population, V, k);% 不错
-                %     % Offspring  = LearnableDE4(Problem, Population, V, k, a);%和2差不多
-                % % end
-                
+                Offspring  = LearnableReproduction(Problem, Population, MLPs, deg_pro);
                 % Algorithm 4 ClusteringAidedSelection
-                cv_offspring = sum(max(0,Offspring.cons),2);
-                feasible_Offspring = Offspring(cv_offspring == 0);
-                Zmin = min([Zmin;Offspring.objs],[],1);
-                %
-                if deg_pro < 0.25
-                    Population = EnvironmentalSelection_TDEA([Population,Offspring],ref_vec,Problem.N,z,znad);
-                    %Population = EnvironmentalSelection_Clustering2([Population,Offspring],Problem.N,z,znad,Problem.N,a);
-                    % Population = Clustering([Population,Offspring],Problem.N,z,znad,Problem.N,a);
-                else
-                    Population = EnvironmentalSelection_Clustering2([Population,Offspring],Problem.N,z,znad,Problem.N,deg_pro);
-                end
-                % if length(Archive) + length(feasible_Offspring) <= Problem.N
-                %     Archive = [Archive,feasible_Offspring];
-                % else
-                %     Archive = EnvironmentalSelection_Clustering3([Archive,feasible_Offspring],Problem.N,z,znad,Problem.N,a);
-                % end
-                % Population = Offspring;
-                % Population = Problem.Evaluation(Population);
+                Population = ClusteringAidedSelection(Problem, Population, Offspring, deg_pro);
             end
         end
     end

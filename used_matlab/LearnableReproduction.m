@@ -1,5 +1,10 @@
-function Offspring = LearnableReproduction(Problem, Population, MLPs, alpha)
-
+function Offspring = LearnableReproduction(Problem, Population, MLPs, deg_pro)
+% Learnable reproduction
+%------------------------------- Information ------------------------------
+% Author: Z.R.Wang
+% Email: wangzhanran@stumail.ysu.edu.cn
+% Affiliation: Intelligent Dynamical Systems Research Group, 
+% Department of Mechanical Design, Yanshan University, China
 %------------------------------- Copyright --------------------------------
 % Copyright (c) 2024 BIMK Group. You are free to use the PlatEMO for
 % research purposes. All publications which use this platform or any code
@@ -8,7 +13,11 @@ function Offspring = LearnableReproduction(Problem, Population, MLPs, alpha)
 % for evolutionary multi-objective optimization [educational forum], IEEE
 % Computational Intelligence Magazine, 2017, 12(4): 73-87".
 %--------------------------------------------------------------------------
-
+    if deg_pro <= 0.5
+        alpha = 0.5;
+    else
+        alpha = 0.0;
+    end
     Offspring = zeros(Problem.N,Problem.D);
     for xi = 1:Problem.N
         x = Population(xi).dec;
