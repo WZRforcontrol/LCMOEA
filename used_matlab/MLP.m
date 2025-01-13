@@ -23,26 +23,19 @@ classdef MLP < handle
         lr % 学习率
         Population  % 种群
         ref_vec % 参考向量
-        batch_size = 32; % 添加批量大小属性
+        data_size % 数据集大小
         
         % M1 与 M2 网络的权重
-        M1_hidden_weights
+        M1_hidden_weights 
         M1_output_weights
         M2_hidden_weights
         M2_output_weights
 
-        % Adam超参数及优化所需动量矩阵
-        beta1 = 0.9;
-        beta2 = 0.999;
-        epsilon = 1e-8;
-        M1_m_hidden
-        M1_v_hidden
-        M1_m_out
-        M1_v_out
-        M2_m_hidden
-        M2_v_hidden
-        M2_m_out
-        M2_v_out
+        % 添加损失记录属性
+        M1_loss_history = [];  % M1网络的训练损失历史
+        M2_loss_history = [];  % M2网络的训练损失历史
+
+        lr_decay = 0.95; % 可选学习率衰减因子
     end
     
     methods
@@ -50,21 +43,18 @@ classdef MLP < handle
             % 初始化基础属性和网络结构大小
             obj.Problem = Problem;
             obj.Population = Population;
-            obj.hidden_size = hidden_size;
-            obj.num_epochs = epochs;
-            obj.lr = lr;
-            obj.ref_vec = ref_vec;
-            obj.num_layers = num_layers; 
+            obj.hidden_size = hidden_size; % 隐藏层大小
+            obj.num_epochs = epochs; % 训练轮数
+            obj.lr = lr; % 学习率
+            obj.ref_vec = ref_vec; % 参考向量
+            obj.num_layers = num_layers; % 神经网络层数
+            obj.data_size = size(ref_vec, 1); % 数据集大小
         end
 
         function Model_init(obj)
             obj.M1_hidden_weights = cell(1,obj.num_layers);
             obj.M2_hidden_weights = cell(1,obj.num_layers);
-            obj.M1_m_hidden = cell(1,obj.num_layers);
-            obj.M1_v_hidden = cell(1,obj.num_layers);
-            obj.M2_m_hidden = cell(1,obj.num_layers);
-            obj.M2_v_hidden = cell(1,obj.num_layers);
-            % 此处为 M1 与 M2 隐藏层与输出层的权重初始化
+            % M1 与 M2 隐藏层与输出层的权重初始化
             for i = 1:obj.num_layers
                 if i == 1
                     input_size = obj.Problem.D;
@@ -73,190 +63,133 @@ classdef MLP < handle
                 end
                 obj.M1_hidden_weights{i} = randn(input_size, obj.hidden_size);
                 obj.M2_hidden_weights{i} = randn(input_size, obj.hidden_size);
-                obj.M1_m_hidden{i} = zeros(size(obj.M1_hidden_weights{i}));
-                obj.M1_v_hidden{i} = zeros(size(obj.M1_hidden_weights{i}));
-                obj.M2_m_hidden{i} = zeros(size(obj.M2_hidden_weights{i}));
-                obj.M2_v_hidden{i} = zeros(size(obj.M2_hidden_weights{i}));
             end
             obj.M1_output_weights = randn(obj.hidden_size, obj.Problem.D);
             obj.M2_output_weights = randn(obj.hidden_size, obj.Problem.D);
-            % 初始化Adam优化中需要的动量与二阶动量矩阵
-            obj.M1_m_out = zeros(size(obj.M1_output_weights));
-            obj.M1_v_out = zeros(size(obj.M1_output_weights));
-            obj.M2_m_out = zeros(size(obj.M2_output_weights));
-            obj.M2_v_out = zeros(size(obj.M2_output_weights));
         end
         
         function train_models(obj)
             [x_1_M1, x_2_M1, x_1_M2, x_2_M2] = obj.prepare_training_data();
-            % 准备数据并分别调用 M1 与 M2 的训练方法
+            % 保存初始学习率
+            initial_lr = obj.lr;
+            % 训练网络
             obj.train_net_M1(x_1_M1, x_2_M1);
+            % 恢复学习率
+            obj.lr = initial_lr;
             obj.train_net_M2(x_1_M2, x_2_M2);
+            % 恢复学习率
+            obj.lr = initial_lr;
         end
 
         function train_net_M1(obj, inputs, targets)
-            % 针对 M1 网络进行批量训练
-            num_samples = size(inputs, 1);
-            num_batches = ceil(num_samples / obj.batch_size);
-            
+            % constraint-ignored任务(M1)训练
             for e = 1:obj.num_epochs
-                % 随机打乱数据
-                shuffle_idx = randperm(num_samples);
-                inputs_shuffled = inputs(shuffle_idx, :);
-                targets_shuffled = targets(shuffle_idx, :);
-                
-                for b = 1:num_batches
-                    % 获取当前批次的数据
-                    start_idx = (b-1) * obj.batch_size + 1;
-                    end_idx = min(b * obj.batch_size, num_samples);
-                    batch_inputs = inputs_shuffled(start_idx:end_idx, :);
-                    batch_targets = targets_shuffled(start_idx:end_idx, :);
-                    current_batch_size = size(batch_inputs, 1);
+                epoch_loss = 0;
+                for i = 1:obj.data_size
+                    % 从(x1, x2)获取(x, x')作为M1训练对
+                    x = inputs(i,:);
+                    t = targets(i,:);
+                    % 前向传播并计算MSE
+                    [outputs, hidden_outputs] = obj.forward_M1(x);
+                    % 计算输出层误差并更新权重
+                    output_err = (outputs - t) .* sigmoid_derivative(outputs);
+                    output_grad = hidden_outputs{end}' * output_err;
+                    obj.M1_output_weights = obj.M1_output_weights - obj.lr * output_grad;
 
-                    % 前向传播
-                    [outputs, hidden_outputs] = obj.forward_batch_M1(batch_inputs);
-                    
-                    % 计算输出层误差
-                    output_err = (outputs - batch_targets) .* sigmoid_derivative(outputs);
-                    output_grad = hidden_outputs{end}' * output_err / current_batch_size;
-                    
                     % 反向传播计算隐藏层误差
                     hidden_err = cell(1, obj.num_layers);
-                    hidden_grad = cell(1, obj.num_layers);
-                    
                     hidden_err{end} = (output_err * obj.M1_output_weights') .* ...
                         leaky_relu_derivative(hidden_outputs{end});
-                    
-                    for i = obj.num_layers-1:-1:1
-                        hidden_err{i} = (hidden_err{i+1} * obj.M1_hidden_weights{i+1}') .* ...
-                            leaky_relu_derivative(hidden_outputs{i});
+                    for j = obj.num_layers-1:-1:1
+                        hidden_err{j} = (hidden_err{j+1} * obj.M1_hidden_weights{j+1}') .* ...
+                            leaky_relu_derivative(hidden_outputs{j});
                     end
                     
-                    % 计算隐藏层梯度
-                    for i = 1:obj.num_layers
-                        if i == 1
-                            hidden_input = batch_inputs;
+                    % 计算隐藏层梯度并更新权重
+                    for j = 1:obj.num_layers
+                        if j == 1
+                            hidden_input = x;
                         else
-                            hidden_input = hidden_outputs{i-1};
+                            hidden_input = hidden_outputs{j-1};
                         end
-                        hidden_grad{i} = hidden_input' * hidden_err{i} / current_batch_size;
+                        % 更新M1网络参数
+                        obj.M1_hidden_weights{j} = obj.M1_hidden_weights{j} - ...
+                            obj.lr * hidden_input' * hidden_err{j};
                     end
-                    
-                    % 使用Adam更新权重
-                    [obj.M1_m_out, obj.M1_v_out, out_delta] = obj.AdamUpdate(obj.M1_m_out, obj.M1_v_out, output_grad, e);
-                    obj.M1_output_weights = obj.M1_output_weights - obj.lr * out_delta;
-                    
-                    for i = 1:obj.num_layers
-                        [obj.M1_m_hidden{i}, obj.M1_v_hidden{i}, h_delta] = ...
-                            obj.AdamUpdate(obj.M1_m_hidden{i}, obj.M1_v_hidden{i}, hidden_grad{i}, e);
-                        obj.M1_hidden_weights{i} = obj.M1_hidden_weights{i} - obj.lr * h_delta;
-                    end
+                    epoch_loss = epoch_loss + mean((outputs - t).^2);
                 end
+                obj.M1_loss_history(end+1) = epoch_loss / obj.data_size;
+                % 在每轮末尾加入学习率衰减
+                obj.lr = obj.lr * obj.lr_decay;
             end
         end
         
         function train_net_M2(obj, inputs, targets)
-            % 针对 M2 网络进行批量训练
-            num_samples = size(inputs, 1);
-            num_batches = ceil(num_samples / obj.batch_size);
-            
+            % 约束可行性任务(M2)训练
             for e = 1:obj.num_epochs
-                % 随机打乱数据
-                shuffle_idx = randperm(num_samples);
-                inputs_shuffled = inputs(shuffle_idx, :);
-                targets_shuffled = targets(shuffle_idx, :);
-                
-                for b = 1:num_batches
-                    % 获取当前批次的数据
-                    start_idx = (b-1) * obj.batch_size + 1;
-                    end_idx = min(b * obj.batch_size, num_samples);
-                    batch_inputs = inputs_shuffled(start_idx:end_idx, :);
-                    batch_targets = targets_shuffled(start_idx:end_idx, :);
-                    current_batch_size = size(batch_inputs, 1);
+                epoch_loss = 0;
+                for i = 1:obj.data_size
+                    % 从(x1, x2)获取(x, x')作为M2训练对
+                    x = inputs(i,:);
+                    t = targets(i,:);
+                    % 前向传播并计算MSE
+                    [outputs, hidden_outputs] = obj.forward_M2(x);
+                    % 计算输出层误差并更新权重
+                    output_err = (outputs - t) .* sigmoid_derivative(outputs);
+                    output_grad = hidden_outputs{end}' * output_err;
+                    obj.M2_output_weights = obj.M2_output_weights - obj.lr * output_grad;
 
-                    % 前向传播
-                    [outputs, hidden_outputs] = obj.forward_batch_M2(batch_inputs);
-                    
-                    % 计算输出层误差
-                    output_err = (outputs - batch_targets) .* sigmoid_derivative(outputs);
-                    output_grad = hidden_outputs{end}' * output_err / current_batch_size;
-                    
                     % 反向传播计算隐藏层误差
                     hidden_err = cell(1, obj.num_layers);
-                    hidden_grad = cell(1, obj.num_layers);
-                    
                     hidden_err{end} = (output_err * obj.M2_output_weights') .* ...
                         leaky_relu_derivative(hidden_outputs{end});
-                    
-                    for i = obj.num_layers-1:-1:1
-                        hidden_err{i} = (hidden_err{i+1} * obj.M2_hidden_weights{i+1}') .* ...
-                            leaky_relu_derivative(hidden_outputs{i});
+                    for j = obj.num_layers-1:-1:1
+                        hidden_err{j} = (hidden_err{j+1} * obj.M2_hidden_weights{j+1}') .* ...
+                            leaky_relu_derivative(hidden_outputs{j});
                     end
                     
-                    % 计算隐藏层梯度
-                    for i = 1:obj.num_layers
-                        if i == 1
-                            hidden_input = batch_inputs;
+                    % 计算隐藏层梯度并更新权重
+                    for j = 1:obj.num_layers
+                        if j == 1
+                            hidden_input = x;
                         else
-                            hidden_input = hidden_outputs{i-1};
+                            hidden_input = hidden_outputs{j-1};
                         end
-                        hidden_grad{i} = hidden_input' * hidden_err{i} / current_batch_size;
+                        % 更新M2网络参数
+                        obj.M2_hidden_weights{j} = obj.M2_hidden_weights{j} - ...
+                            obj.lr * hidden_input' * hidden_err{j};
                     end
-                    
-                    % 使用Adam更新权重
-                    [obj.M2_m_out, obj.M2_v_out, out_delta] = obj.AdamUpdate(obj.M2_m_out, obj.M2_v_out, output_grad, e);
-                    obj.M2_output_weights = obj.M2_output_weights - obj.lr * out_delta;
-                    
-                    for i = 1:obj.num_layers
-                        [obj.M2_m_hidden{i}, obj.M2_v_hidden{i}, h_delta] = ...
-                            obj.AdamUpdate(obj.M2_m_hidden{i}, obj.M2_v_hidden{i}, hidden_grad{i}, e);
-                        obj.M2_hidden_weights{i} = obj.M2_hidden_weights{i} - obj.lr * h_delta;
-                    end
+                    epoch_loss = epoch_loss + mean((outputs - t).^2);
                 end
+                obj.M2_loss_history(end+1) = epoch_loss / obj.data_size;
+                % 在每轮末尾加入学习率衰减
+                obj.lr = obj.lr * obj.lr_decay;
             end
         end
 
-        function [outputs, hidden_outputs] = forward_batch_M1(obj, inputs)
-            % 批量前向传播 M1
-            hidden_outputs = cell(1, obj.num_layers);
-            for i = 1:obj.num_layers
-                if i == 1
-                    h_in = inputs * obj.M1_hidden_weights{i};
-                else
-                    h_in = hidden_outputs{i-1} * obj.M1_hidden_weights{i};
-                end
-                hidden_outputs{i} = leaky_relu(h_in);
-            end
-            outputs = sigmoid(hidden_outputs{end} * obj.M1_output_weights);
-        end
-
-        function [outputs, hidden_outputs] = forward_batch_M2(obj, inputs)
-            % 批量前向传播 M2
-            hidden_outputs = cell(1, obj.num_layers);
-            for i = 1:obj.num_layers
-                if i == 1
-                    h_in = inputs * obj.M2_hidden_weights{i};
-                else
-                    h_in = hidden_outputs{i-1} * obj.M2_hidden_weights{i};
-                end
-                hidden_outputs{i} = leaky_relu(h_in);
-            end
-            outputs = sigmoid(hidden_outputs{end} * obj.M2_output_weights);
-        end
-
-        function [m, v, delta] = AdamUpdate(obj, m_old, v_old, grad, t)
-            % Adam优化算法的核心更新函数
-            beta1t = obj.beta1^t;
-            beta2t = obj.beta2^t;
-            m = obj.beta1*m_old + (1-obj.beta1)*grad;
-            v = obj.beta2*v_old + (1-obj.beta2)*(grad.^2);
-            m_hat = m./(1-beta1t);
-            v_hat = v./(1-beta2t);
-            delta = m_hat./(sqrt(v_hat)+obj.epsilon);
+        % 添加绘制损失曲线的方法
+        function plot_loss(obj)
+            figure('Name', 'Training Loss');
+            
+            % 创建子图1：M1网络损失
+            subplot(2,1,1);
+            plot(1:length(obj.M1_loss_history), obj.M1_loss_history, 'b-', 'LineWidth', 1.5);
+            title('M1 Network Training Loss');
+            xlabel('Epoch');
+            ylabel('Loss');
+            grid on;
+            
+            % 创建子图2：M2网络损失
+            subplot(2,1,2);
+            plot(1:length(obj.M2_loss_history), obj.M2_loss_history, 'r-', 'LineWidth', 1.5);
+            title('M2 Network Training Loss');
+            xlabel('Epoch');
+            ylabel('Loss');
+            grid on;
         end
 
         function [output, hidden_outputs] = forward_M1(obj, input)
-            % 计算 M1 前向传播各层激活值
+            % 针对单个输入的M1前向传播
             hidden_outputs = cell(1,obj.num_layers);
             for i = 1:obj.num_layers
                 if i == 1
@@ -270,7 +203,7 @@ classdef MLP < handle
         end
 
         function [output, hidden_outputs] = forward_M2(obj, input)
-            % 计算 M2 前向传播各层激活值
+            % 针对单个输入的M2前向传播
             hidden_outputs = cell(1,obj.num_layers);
             for i = 1:obj.num_layers
                 if i == 1
@@ -289,9 +222,9 @@ classdef MLP < handle
             Upper = obj.Problem.upper;
             inputs = (inputs - repmat(Lower, size(inputs, 1), 1)) ./ repmat(Upper - Lower, size(inputs, 1), 1);
             % 前向传播计算输出
-            [tmp, ~] = obj.forward_M1(inputs);
+            [y, ~] = obj.forward_M1(inputs);
             % 反归一化输出数据
-            y = tmp .* repmat(Upper - Lower, size(tmp, 1), 1) + repmat(Lower, size(tmp, 1), 1);
+            y = y .* repmat(Upper - Lower, size(y, 1), 1) + repmat(Lower, size(y, 1), 1);
         end
 
         function y = ReproductionM2(obj, inputs)
@@ -300,9 +233,9 @@ classdef MLP < handle
             Upper = obj.Problem.upper;
             inputs = (inputs - repmat(Lower, size(inputs, 1), 1)) ./ repmat(Upper - Lower, size(inputs, 1), 1);
             % 前向传播计算输出
-            [tmp, ~] = obj.forward_M2(inputs);
+            [y, ~] = obj.forward_M2(inputs);
             % 反归一化输出数据
-            y = tmp .* repmat(Upper - Lower, size(tmp, 1), 1) + repmat(Lower, size(tmp, 1), 1);
+            y = y .* repmat(Upper - Lower, size(y, 1), 1) + repmat(Lower, size(y, 1), 1);
         end
 
         function [x_1_M1, x_2_M1, x_1_M2, x_2_M2] = prepare_training_data(obj)
@@ -313,7 +246,7 @@ classdef MLP < handle
             x_2_M1 = zeros(length(obj.ref_vec), obj.Problem.D);
             x_1_M2 = zeros(length(obj.ref_vec), obj.Problem.D);
             x_2_M2 = zeros(length(obj.ref_vec), obj.Problem.D);
- 
+     
             PopObj = obj.Population.objs;
             zmin = min(PopObj,[],1);
             zmax = max(PopObj,[],1);
@@ -323,32 +256,7 @@ classdef MLP < handle
             Popcon = Popcon * w_con';
             INDEX = obj.Association(PopObj); % 关联个体索引
             
-            % % 绘制关联向量
-            % PopObj = PopObj./vecnorm(PopObj,2,2); % 归一化目标值到单位超球面
-            % % Plot association vectors
-            % figure;
-            % for i = 1:size(INDEX,1)
-            %     start_point = PopObj(INDEX(i,1),:);
-            %     end_point = PopObj(INDEX(i,2),:);
-            %     if size(PopObj,2) == 2
-            %         % 2D plot
-            %         plot([start_point(1) end_point(1)], [start_point(2) end_point(2)], 'b-');
-            %         hold on;
-            %     elseif size(PopObj,2) == 3
-            %         % 3D plot
-            %         plot3([start_point(1) end_point(1)], [start_point(2) end_point(2)], [start_point(3) end_point(3)], 'b-');
-            %         hold on;
-            %     end
-            % end
-            % grid on;
-            % xlabel('f1');
-            % ylabel('f2');
-            % if size(PopObj,2) == 3
-            %     zlabel('f3');
-            % end
-            % title('Association Vectors');
-            
-            for i = 1:length(obj.ref_vec)
+            for i = 1:size(obj.ref_vec,1)
                 v = obj.ref_vec(i,:); % 参考向量
                 x_idx = INDEX(i,:); % 关联的个体索引
 
@@ -378,6 +286,46 @@ classdef MLP < handle
                     end
                 end
             end
+
+            % %% 在归一化之前绘制训练数据的目标空间关联向量,测试数据集合格与否
+            % PopObj_x1 = obj.Problem.CalObj(x_1_M1);
+            % PopObj_x2 = obj.Problem.CalObj(x_2_M1);
+            % 
+            % % 创建新图窗
+            % figure('Name', 'Training Data Association Vectors');
+            % 
+            % % 根据目标维度选择绘图方式
+            % if size(PopObj_x1, 2) == 2
+            %     % 2D绘图
+            %     for i = 1:size(x_1_M1, 1)
+            %         quiver(PopObj_x1(i,1), PopObj_x1(i,2), ...
+            %               PopObj_x2(i,1)-PopObj_x1(i,1), ...
+            %               PopObj_x2(i,2)-PopObj_x1(i,2), ...
+            %               0, 'b-', 'LineWidth', 1);
+            %         hold on;
+            %     end
+            %     xlabel('f1');
+            %     ylabel('f2');
+            % elseif size(PopObj_x1, 2) == 3
+            %     % 3D绘图
+            %     for i = 1:size(x_1_M1, 1)
+            %         quiver3(PopObj_x1(i,1), PopObj_x1(i,2), PopObj_x1(i,3), ...
+            %                PopObj_x2(i,1)-PopObj_x1(i,1), ...
+            %                PopObj_x2(i,2)-PopObj_x1(i,2), ...
+            %                PopObj_x2(i,3)-PopObj_x1(i,3), ...
+            %                0, 'b-', 'LineWidth', 1);
+            %         hold on;
+            %     end
+            %     xlabel('f1');
+            %     ylabel('f2');
+            %     zlabel('f3');
+            %     view(45, 45);
+            % end
+            % grid on;
+            % title('Training Data Association Vectors (Before Normalization)');
+            % hold off;
+            
+            %% 归一化
             Lower = obj.Problem.lower;
             Upper = obj.Problem.upper;
             x_1_M1 = (x_1_M1 - repmat(Lower,size(x_1_M1,1),1)) ./ repmat(Upper-Lower,size(x_1_M1,1),1);

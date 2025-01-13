@@ -44,6 +44,9 @@ classdef LCMOEA < ALGORITHM
                 Offspring  = LearnableReproduction(Problem, Population, MLPs, deg_pro);
                 % Algorithm 4 ClusteringAidedSelection
                 Population = ClusteringAidedSelection(Problem, Population, Offspring, deg_pro);
+                % if Algorithm.pro.FE == Algorithm.pro.maxFE - Problem.N
+                %     MLPs.plot_loss();
+                % end
             end
         end
     end
